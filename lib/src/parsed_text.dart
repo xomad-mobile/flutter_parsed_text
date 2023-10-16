@@ -74,7 +74,7 @@ class ParsedText extends StatelessWidget {
   /// [text] paramtere should not be null and is always required.
   /// If the [style] argument is null, the text will use the style from the
   /// closest enclosing [DefaultTextStyle].
-  ParsedText({
+  const ParsedText({
     Key? key,
     required this.text,
     this.parse = const <MatchText>[],
@@ -95,27 +95,14 @@ class ParsedText extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     // Seperate each word and create a new Array
-    String newString = text;
 
-    Map<String, MatchText> _mapping = Map<String, MatchText>();
+    Map<String, MatchText> parseMapping = _parseMapping(parse);
 
-    parse.forEach((e) {
-      if (e.type == ParsedType.EMAIL) {
-        _mapping[emailPattern] = e;
-      } else if (e.type == ParsedType.PHONE) {
-        _mapping[phonePattern] = e;
-      } else if (e.type == ParsedType.URL) {
-        _mapping[urlPattern] = e;
-      } else {
-        _mapping[e.pattern!] = e;
-      }
-    });
-
-    final pattern = '(${_mapping.keys.toList().join('|')})';
+    final pattern = '(${parseMapping.keys.toList().join('|')})';
 
     List<InlineSpan> widgets = [];
 
-    newString.splitMapJoin(
+    text.splitMapJoin(
       RegExp(
         pattern,
         multiLine: regexOptions.multiLine,
@@ -126,57 +113,64 @@ class ParsedText extends StatelessWidget {
       onMatch: (Match match) {
         final matchText = match[0];
 
-        final mapping = _mapping[matchText!] ??
-            _mapping[_mapping.keys.firstWhere((element) {
-              final reg = RegExp(
-                element,
-                multiLine: regexOptions.multiLine,
-                caseSensitive: regexOptions.caseSensitive,
-                dotAll: regexOptions.dotAll,
-                unicode: regexOptions.unicode,
-              );
-              return reg.hasMatch(matchText);
-            }, orElse: () {
-              return '';
-            })];
+        final mapping = matchText == null
+            ? null
+            : _getMatchText(parseMapping, matchText, regexOptions);
 
         InlineSpan widget;
 
         if (mapping != null) {
           if (mapping.renderText != null) {
             Map<String, String> result =
-                mapping.renderText!(str: matchText, pattern: pattern);
+                mapping.renderText!(str: matchText ?? '', pattern: pattern);
 
             widget = TextSpan(
               text: "${result['display']}",
-              style: mapping.style != null ? mapping.style : style,
+              style: mapping.style ?? style,
               recognizer: TapGestureRecognizer()
                 ..onTap = () {
                   final value = result['value'] ?? matchText;
+                  if (value == null) return;
                   mapping.onTap?.call(value);
                 },
+            );
+          } else if (mapping.renderSecondLevelSimplePatternText != null) {
+            final childParsedConfig = mapping.renderSecondLevelSimplePatternText
+                ?.call(matchedText: matchText ?? '');
+            widget = TextSpan(
+              style: mapping.style ?? style,
+              recognizer: TapGestureRecognizer()
+                ..onTap = () => mapping.onTap?.call(matchText ?? ''),
+              children: [
+                ..._createInlineSpanChildFromText(
+                  inputText: childParsedConfig!.inputText,
+                  childParse: childParsedConfig.parseConfig,
+                  regexOptions: regexOptions,
+                  style: mapping.style,
+                ),
+              ],
             );
           } else if (mapping.renderWidget != null) {
             widget = WidgetSpan(
               alignment: PlaceholderAlignment.middle,
               child: GestureDetector(
-                onTap: () => mapping.onTap!(matchText),
+                onTap: () => mapping.onTap?.call(matchText ?? ''),
                 child: mapping.renderWidget!(
-                    text: matchText, pattern: mapping.pattern!),
+                    text: matchText ?? '', pattern: mapping.pattern!),
               ),
             );
           } else {
             widget = TextSpan(
-              text: "$matchText",
-              style: mapping.style != null ? mapping.style : style,
+              text: matchText,
+              style: mapping.style ?? style,
               recognizer: TapGestureRecognizer()
-                ..onTap = () => mapping.onTap!(matchText),
+                ..onTap = () => mapping.onTap?.call(matchText ?? ''),
             );
           }
         } else {
           widget = TextSpan(
-            text: "$matchText",
-            style: this.style,
+            text: matchText,
+            style: style,
           );
         }
 
@@ -186,8 +180,8 @@ class ParsedText extends StatelessWidget {
       },
       onNonMatch: (String text) {
         widgets.add(TextSpan(
-          text: "$text",
-          style: this.style,
+          text: text,
+          style: style,
         ));
 
         return '';
@@ -221,5 +215,100 @@ class ParsedText extends StatelessWidget {
         style: style,
       ),
     );
+  }
+
+  List<InlineSpan> _createInlineSpanChildFromText({
+    required String inputText,
+    required List<MatchText> childParse,
+    required RegexOptions regexOptions,
+    TextStyle? style,
+  }) {
+    String newString = inputText;
+
+    Map<String, MatchText> _mapping = _parseMapping(childParse);
+
+    final pattern = '(${_mapping.keys.toList().join('|')})';
+
+    List<InlineSpan> widgets = [];
+
+    newString.splitMapJoin(
+      RegExp(
+        pattern,
+        multiLine: regexOptions.multiLine,
+        caseSensitive: regexOptions.caseSensitive,
+        dotAll: regexOptions.dotAll,
+        unicode: regexOptions.unicode,
+      ),
+      onMatch: (Match match) {
+        final matchText = match[0];
+
+        MatchText? mapping =
+            _getMatchText(_mapping, matchText ?? '', regexOptions);
+
+        InlineSpan widget;
+
+        if (mapping != null) {
+          widget = TextSpan(
+            text: matchText,
+            style: mapping.style ?? style,
+            recognizer: TapGestureRecognizer()
+              ..onTap = () => mapping.onTap?.call(matchText ?? ''),
+          );
+        } else {
+          widget = TextSpan(
+            text: matchText,
+            style: style,
+          );
+        }
+        widgets.add(widget);
+
+        return '';
+      },
+      onNonMatch: (String text) {
+        widgets.add(TextSpan(
+          text: text,
+          style: style,
+        ));
+
+        return '';
+      },
+    );
+
+    return widgets;
+  }
+
+  MatchText? _getMatchText(Map<String, MatchText> parseMapping,
+      String matchText, RegexOptions regexOptions) {
+    final mapping = parseMapping[matchText] ??
+        parseMapping[parseMapping.keys.firstWhere((element) {
+          final reg = RegExp(
+            element,
+            multiLine: regexOptions.multiLine,
+            caseSensitive: regexOptions.caseSensitive,
+            dotAll: regexOptions.dotAll,
+            unicode: regexOptions.unicode,
+          );
+          return reg.hasMatch(matchText);
+        }, orElse: () {
+          return '';
+        })];
+    return mapping;
+  }
+
+  Map<String, MatchText> _parseMapping(List<MatchText> childParse) {
+    Map<String, MatchText> mapping = <String, MatchText>{};
+
+    for (var e in childParse) {
+      if (e.type == ParsedType.EMAIL) {
+        mapping[emailPattern] = e;
+      } else if (e.type == ParsedType.PHONE) {
+        mapping[phonePattern] = e;
+      } else if (e.type == ParsedType.URL) {
+        mapping[urlPattern] = e;
+      } else {
+        mapping[e.pattern!] = e;
+      }
+    }
+    return mapping;
   }
 }
