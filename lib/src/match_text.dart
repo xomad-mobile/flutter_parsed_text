@@ -2,6 +2,21 @@ part of flutter_parsed_text;
 
 enum ParsedType { EMAIL, PHONE, URL, CUSTOM }
 
+class ChildParsedConfig {
+  /// Required input text is removed <ins>,<del> at begin and end
+  final String inputText;
+
+  /// Takes a list of [MatchText] object.
+  ///
+  /// This list is used to find patterns in the [inpuText]x
+  final List<MatchText> parseConfig;
+
+  ChildParsedConfig({
+    required this.inputText,
+    this.parseConfig = const [],
+  });
+}
+
 /// A MatchText class which provides a structure for [ParsedText] to handle
 /// Pattern matching and also to provide custom [Function] and custom [TextStyle].
 class MatchText {
@@ -34,10 +49,24 @@ class MatchText {
 
   /// A callback function that takes the [text] the matches the [pattern] and returns
   /// the [Widget] to be displayed inside a [WidgetSpan]
+  /// It's good for having MULTIPLE-LEVEL pattern (Pattern inside Pattern inside PATTERN).
+  /// Issue: WidgetSpan with long content will be break to the next line
   Widget Function({
     required String text,
     required String pattern,
   })? renderWidget;
+
+  /// A callback function that takes the [text] the matches the [pattern] and returns
+  /// the [ChildParsedConfig] to config the display inside a [TextSpan].
+  /// It's good for having TWO-LEVEL pattern (Pattern inside Pattern).
+  /// Example:
+  ///
+  /// normal text <ins> with insert tag, use this function to detect simple pattern URL, #Hashtag, @tag
+  /// inside insert tag https://google.com #hashtag </ins>
+  ///
+  ChildParsedConfig Function({
+    required String matchedText,
+  })? renderSecondLevelSimplePatternText;
 
   /// Creates a MatchText object
   MatchText({
@@ -47,5 +76,6 @@ class MatchText {
     this.onTap,
     this.renderText,
     this.renderWidget,
+    this.renderSecondLevelSimplePatternText,
   });
 }
